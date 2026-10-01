@@ -96,6 +96,10 @@ def send_push(title, body):
         if not os.environ.get(name, "").strip():
             sys.exit(f"Secret {name} が空です。Settings → Secrets and variables → Actions の"
                      " Repository secrets に登録されているか確認してください")
+    subject = os.environ.get("VAPID_SUBJECT", "").strip()
+    if not subject.startswith(("mailto:", "https:")):
+        sys.exit(f"Variable VAPID_SUBJECT が不正です ({subject!r})。Settings → Secrets and variables"
+                 " → Actions の Variables に mailto:自分のメールアドレス を登録してください")
     subs = json.loads(os.environ["PUSH_SUBSCRIPTIONS"])
     if isinstance(subs, dict):
         subs = [subs]
@@ -105,7 +109,7 @@ def send_push(title, body):
         try:
             webpush(sub, payload,
                     vapid_private_key=os.environ["VAPID_PRIVATE_KEY"],
-                    vapid_claims={"sub": os.environ.get("VAPID_SUBJECT", "mailto:admin@example.com")},
+                    vapid_claims={"sub": subject},
                     ttl=6 * 3600)
             print("sent:", sub["endpoint"][:60], "...")
         except WebPushException as e:
