@@ -1,0 +1,72 @@
+name: ごみの日通知
+
+on:
+  schedule:
+    # 毎日 19:30 JST (= 10:30 UTC)。Actions の cron は遅延することがあるので少し早めに設定
+    - cron: "30 10 * * *"
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "テスト通知を送る"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: gomi
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      DISTRICT_CODE: ${{ vars.DISTRICT_CODE }}
+      PUSH_SUBSCRIPTIONS: ${{ secrets.PUSH_SUBSCRIPTIONS }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      VAPID_SUBJECT: ${{ vars.VAPID_SUBJECT }}
+      NOTICE_DAYS_AHEAD: ${{ vars.NOTICE_DAYS_AHEAD || 7 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+
+      - name: スケジュール取得
+        run: python scripts/gomi.py fetch
+
+      - name: 通知
+        # push 時はスケジュール更新だけ。定期実行と手動実行のときに通知する
+        if: github.event_name != 'push' && env.PUSH_SUBSCRIPTIONS != ''
+        run: python scripts/gomi.py notify ${{ inputs.test && '--test' || '' }}
+
+      - name: 公開鍵を config.json に書き出し
+        run: echo '{"vapidPublicKey":"${{ vars.VAPID_PUBLIC_KEY }}"}' > public/config.json
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  # 60 日間リポジトリに動きがないと定期実行が自動停止されるため、
+  # 定期実行のたびにこのワークフローを再有効化して無操作期間をリセットする (コミットは作らない)
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/notify.yml/enable"
+        env:
+          GH_TOKEN: ${{ github.token }}

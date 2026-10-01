@@ -1,0 +1,4 @@
+public/config.json
+public/schedule.json
+__pycache__/
+.claude/
