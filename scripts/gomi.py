@@ -92,6 +92,10 @@ def write_json(path, obj):
 def send_push(title, body):
     from pywebpush import webpush, WebPushException
 
+    for name in ("PUSH_SUBSCRIPTIONS", "VAPID_PRIVATE_KEY"):
+        if not os.environ.get(name, "").strip():
+            sys.exit(f"Secret {name} が空です。Settings → Secrets and variables → Actions の"
+                     " Repository secrets に登録されているか確認してください")
     subs = json.loads(os.environ["PUSH_SUBSCRIPTIONS"])
     if isinstance(subs, dict):
         subs = [subs]

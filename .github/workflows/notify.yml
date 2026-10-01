@@ -46,7 +46,7 @@ jobs:
 
       - name: 通知
         # push 時はスケジュール更新だけ。定期実行と手動実行のときに通知する
-        if: github.event_name != 'push' && env.PUSH_SUBSCRIPTIONS != ''
+        if: github.event_name != 'push'
         run: python scripts/gomi.py notify ${{ inputs.test && '--test' || '' }}
 
       - name: 公開鍵を config.json に書き出し
