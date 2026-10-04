@@ -4,6 +4,9 @@ on:
   schedule:
     # 毎日 19:30 JST (= 10:30 UTC)。Actions の cron は遅延することがあるので少し早めに設定
     - cron: "30 10 * * *"
+    # 予備: 21:00 JST (= 12:00 UTC)。定期実行はまれに丸ごと飛ばされるため。
+    # 19:30 の回が成功していればこちらは通知しない
+    - cron: "0 12 * * *"
   push:
     branches: [main]
   workflow_dispatch:
@@ -15,6 +18,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -44,9 +48,23 @@ jobs:
       - name: スケジュール取得
         run: python scripts/gomi.py fetch
 
+      - name: 今日すでに通知済みか確認
+        id: done
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          today=$(TZ=Asia/Tokyo date +%F)
+          n=$(gh api -X GET "repos/${{ github.repository }}/actions/workflows/notify.yml/runs" \
+                -f event=schedule -f status=success -f "created=>=${today}T00:00:00+09:00" \
+                --jq '.total_count')
+          echo "今日 (${today}) 成功済みの定期実行: ${n} 件"
+          echo "count=${n}" >> "$GITHUB_OUTPUT"
+
       - name: 通知
         # push 時はスケジュール更新だけ。定期実行と手動実行のときに通知する
-        if: github.event_name != 'push'
+        # 定期実行は、今日すでに成功した回があれば送らない (予備の回で二重に届かないように)
+        if: github.event_name != 'push' && (steps.done.outputs.count || '0') == '0'
         run: python scripts/gomi.py notify ${{ inputs.test && '--test' || '' }}
 
       - name: 公開鍵を config.json に書き出し
