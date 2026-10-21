@@ -24,6 +24,8 @@ import json
 import os
 import re
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -49,8 +51,20 @@ def label(iso):
 def http(data=None):
     body = urllib.parse.urlencode(data).encode() if data else None
     req = urllib.request.Request(URL, data=body, headers={"User-Agent": "aizu-gomi-notifier"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return r.read().decode("utf-8", errors="replace")
+    # 市のサイトは一時的に 502 などを返すことがあるので、待って取り直す
+    waits = [30, 60, 120]
+    for attempt in range(len(waits) + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.read().decode("utf-8", errors="replace")
+        except (urllib.error.URLError, TimeoutError) as e:
+            # 4xx は取り直しても変わらないので、すぐ失敗にする
+            if isinstance(e, urllib.error.HTTPError) and e.code < 500:
+                raise
+            if attempt == len(waits):
+                raise
+            print(f"取得失敗 ({e})。{waits[attempt]} 秒後に再試行します", file=sys.stderr)
+            time.sleep(waits[attempt])
 
 
 def list_districts():
