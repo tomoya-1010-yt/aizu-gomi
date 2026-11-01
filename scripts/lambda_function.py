@@ -1,4 +1,4 @@
-"""AWS Lambda から scripts/gomi.py を動かすための入口 (ハンドラ)。
+"""AWS Lambda から gomi.py を動かすための入口 (ハンドラ)。
 
 GitHub Actions 版は環境変数とローカルの public/ を使うが、Lambda 版は
   - 設定と秘密 → Parameter Store (/aizu-gomi/...) から読む
@@ -11,7 +11,7 @@ GitHub Actions 版は環境変数とローカルの public/ を使うが、Lambd
   {"command": "notify", "test": true}       内容に関係なくテスト通知を送る
   {"command": "notify"}                     本番 (EventBridge から呼ぶ形)
 
-環境変数 (Lambda の「設定」→「環境変数」で登録):
+環境変数 (template.yaml の Environment で設定):
   BUCKET      schedule.json を置く S3 バケット名
   SSM_PREFIX  Parameter Store の階層 (既定 /aizu-gomi)
 """

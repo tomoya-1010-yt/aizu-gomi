@@ -6,3 +6,7 @@ __pycache__/
 aws/build/
 aws/wheels/
 aws/*.zip
+# sam build の出力
+.aws-sam/
+# sam deploy --guided の答え (メールアドレスを含むので公開リポジトリに載せない)
+samconfig.toml
