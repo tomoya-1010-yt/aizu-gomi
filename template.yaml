@@ -1,0 +1,114 @@
+# ごみの日通知の AWS 構成 (SAM テンプレート)
+#
+# フェーズ4a: Lambda・毎日のスケジュール・失敗時のメール通知
+# S3 バケットと CloudFront はまだ手作業版を使う (4b でここに移す)。
+# 秘密の値 (VAPID 秘密鍵・購読情報) は Parameter Store に手作業で置き、ここでは名前で参照するだけ。
+#
+#   sam build    scripts/ と依存パッケージを Lambda 用に荷造りする (.aws-sam/ に出力)
+#   sam deploy   CloudFormation のスタックとして AWS に反映する
+
+# CloudFormation テンプレートの書式の版。この日付以外の値はない
+AWSTemplateFormatVersion: "2010-09-09"
+# この行があると SAM の短い書き方 (AWS::Serverless::*) が使える。デプロイ時に CloudFormation の書き方に展開される
+Transform: AWS::Serverless-2016-10-31
+Description: aizu-gomi ごみの日通知
+
+# デプロイするときに外から渡す値 (sam deploy --guided で聞かれ、samconfig.toml に保存される)
+Parameters:
+  BucketName:
+    Type: String
+    Description: schedule.json を置く S3 バケット (4b まで手作業で作ったものを使う)
+  SsmPrefix:
+    Type: String
+    Default: /aizu-gomi
+    Description: Parameter Store の階層
+  AlertEmail:
+    Type: String
+    Description: 失敗を知らせるメールの宛先
+
+Resources:
+  # 実行ログの置き場所。Lambda に任せると自動で作られるが、保存期間が「無期限」になるので自分で作る
+  NotifyLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+
+  NotifyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      # 名前は付けない。CloudFormation が「スタック名-NotifyFunction-ランダム」で付けるので、
+      # 手作業版の aizu-gomi-notify と名前がぶつからず、並べて動かせる
+      Description: 市のごみカレンダーを取得して schedule.json を更新し、Web Push で通知する
+      # このフォルダーと requirements.txt を sam build が荷造りする (3-4b の手作業の zip づくりの代わり)
+      CodeUri: scripts/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.12
+      Architectures: [x86_64]
+      # 送信時に 135MB 使うので 256MB (メモリを増やすと CPU も比例して増える)
+      MemorySize: 256
+      # 市のサイトが落ちたときの再試行 (30+60+120 秒) を待てるように 5 分
+      Timeout: 300
+      LoggingConfig:
+        LogGroup: !Ref NotifyLogGroup
+      Environment:
+        Variables:
+          BUCKET: !Ref BucketName
+          SSM_PREFIX: !Ref SsmPrefix
+      # 実行ロールに付ける権限。手作業版のインラインポリシーと同じ最小限にする
+      # (SAM はこれとログを書く権限を合わせた実行ロールを自動で作る)
+      Policies:
+        - Statement:
+            - Sid: ReadParameters
+              Effect: Allow
+              Action: ssm:GetParametersByPath
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}
+            - Sid: WriteSchedule
+              Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub arn:${AWS::Partition}:s3:::${BucketName}/schedule.json
+      # この関数を呼ぶきっかけ。ScheduleV2 は EventBridge Scheduler のこと
+      # (SAM がスケジュールと「Lambda を呼んでよい」スケジューラーロールをまとめて作る)
+      Events:
+        Daily:
+          Type: ScheduleV2
+          Properties:
+            # 分 時 日 月 曜日 年。日と曜日はどちらかを ? にする決まり
+            ScheduleExpression: cron(30 19 * * ? *)
+            ScheduleExpressionTimezone: Asia/Tokyo
+            Input: '{"command": "notify"}'
+            RetryPolicy:
+              MaximumRetryAttempts: 3
+              MaximumEventAgeInSeconds: 3600
+
+  # 失敗を知らせる宛先。メール購読は作り直すたびに届く確認メールで「Confirm」が必要
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  # Errors が 5 分間で 1 回以上なら ALARM。動かない時間帯はデータが無いので「正常」とみなす
+  NotifyErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: ごみ通知の Lambda が失敗した
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref NotifyFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+# デプロイ後に表示される値。作られたものの名前を確かめるのに使う
+Outputs:
+  NotifyFunctionName:
+    Value: !Ref NotifyFunction
+  AlertTopicArn:
+    Value: !Ref AlertTopic
